@@ -131,13 +131,24 @@ v.version = ver.Version
 # Does NOT match T-words inside other commands (e.g. M104 T0 stays intact).
 _TOOLCHANGE_LINE_RE = re.compile(r"^\s*T\d+\s*(?:;.*)?\r?$")
 
+# Matches OctoPrint-specific O-commands used for connected Palette pings:
+#   O31 L350.00 mm  — standard connected-mode ping (Palette 2/3)
+#   O40 L350.00 mm  — Palette 3 connected via OctoPrint P3PING plugin
+# These are not valid Klipper commands and would cause "Unknown command" errors.
+# Standard accessory-mode pings (G4 pause sequences + retract/unretract) are
+# inserted instead when P2PP ACCESSORY_MODE is configured, and those are
+# valid Klipper gcode that the physical Palette 3 can detect via filament-flow
+# sensing — no stripping needed for those.
+_OCTOPRINT_CMD_RE = re.compile(r"^\s*O\d+\b.*\r?$")
+
 
 def _strip_toolchange_lines(gcode_text):
-    """Return gcode_text with all standalone Tx lines removed."""
+    """Return gcode_text with Tx and OctoPrint O-commands removed."""
     return "\n".join(
         line
         for line in gcode_text.splitlines()
         if not _TOOLCHANGE_LINE_RE.match(line)
+        and not _OCTOPRINT_CMD_RE.match(line)
     ) + "\n"
 
 
