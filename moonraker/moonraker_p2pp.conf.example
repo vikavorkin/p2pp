@@ -1,0 +1,24 @@
+# moonraker_p2pp.conf.example
+#
+# Add this [p2pp] section to your moonraker.conf (or include it from there).
+# Moonraker must be able to find p2pp_component.py — either copy/symlink it
+# into ~/moonraker/moonraker/components/p2pp.py, or configure a custom
+# component path in moonraker.conf via the [server] section:
+#
+#   [server]
+#   ...
+#   # (Moonraker 0.8+) path to a directory with extra components
+#   # components_path: /home/pi/p2pp/moonraker
+#
+# Then add the section below.
+
+[p2pp]
+# Required: absolute path to p2pp_headless.py
+script_path: /home/pi/p2pp/p2pp_headless.py
+
+# Optional: Moonraker file roots to monitor for gcode uploads.
+# Separate multiple roots with commas.  Default: gcodes
+# watch_roots: gcodes
+
+# Optional: maximum number of files processed concurrently.  Default: 2
+# max_concurrent: 2
