@@ -5,6 +5,10 @@ Watches Moonraker's gcodes root for newly uploaded .gcode files that contain
 P2PP Palette 3 configuration markers, then automatically runs p2pp_headless.py
 as a subprocess to generate the corresponding .mcfx file.
 
+After the .mcfx is created the component can optionally:
+  - Upload it to the Palette 3 device over its HTTP API
+  - Instruct Klipper to start printing the original .gcode
+
 Installation
 ------------
 1. Place (or symlink) this file into Moonraker's components directory:
@@ -17,11 +21,20 @@ Installation
        # Required: absolute path to p2pp_headless.py
        script_path: /home/pi/p2pp/p2pp_headless.py
 
+       # Optional: IP or hostname of the Palette 3 for automatic .mcfx upload
+       # palette3_host: 192.168.1.100
+
+       # Optional: start printing the .gcode automatically after upload
+       # auto_print: false
+
        # Optional: file roots to monitor (default: gcodes)
        # watch_roots: gcodes
 
        # Optional: max concurrent processing jobs (default: 2)
        # max_concurrent: 2
+
+       # Optional: Palette 3 upload timeout in seconds (default: 120)
+       # p3_upload_timeout: 120
 
 3. Restart Moonraker.
 
@@ -34,6 +47,15 @@ Workflow
                     p2pp_headless.py myprint.gcode myprint.mcfx
                               |
                     gcodes/myprint.mcfx  (appears in Fluidd/Mainsail)
+                              |
+              [if palette3_host configured]
+                              |
+                    POST http://<palette3_host>:5000/print-file
+                              |
+              [if auto_print: true]
+                              |
+                    Klipper starts printing myprint.gcode
+                    Palette 3 runs in sync via embedded pings
 
 The original .gcode is left untouched.  Configuration comes entirely from
 ;P2PP ... comments embedded in the gcode by PrusaSlicer.
@@ -50,6 +72,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..confighelper import ConfigHelper
+
+try:
+    import aiohttp as _aiohttp
+except ImportError:
+    _aiohttp = None  # type: ignore[assignment]
 
 # Regex matching the P2PP Palette 3 marker written by PrusaSlicer into
 # the config block at the end of every exported gcode file.
@@ -76,10 +103,21 @@ class P2PPComponent:
         max_concurrent: int = config.getint("max_concurrent", 2)
         self._semaphore = asyncio.Semaphore(max_concurrent)
 
+        # Palette 3 upload / auto-print options
+        self._p3_host: str = config.get("palette3_host", "")
+        self._p3_upload_timeout: int = config.getint("p3_upload_timeout", 120)
+        self._auto_print: bool = config.getboolean("auto_print", False)
+
         if not os.path.isfile(self._script):
             self.logger.warning(
                 "P2PP: script_path does not exist: %s — component will be inactive",
                 self._script,
+            )
+
+        if self._p3_host and _aiohttp is None:
+            self.logger.warning(
+                "P2PP: palette3_host is set but aiohttp is not installed — "
+                "upload to Palette 3 will be skipped"
             )
 
         self.server.register_event_handler(
@@ -87,8 +125,10 @@ class P2PPComponent:
             self._on_filelist_changed,
         )
         self.logger.info(
-            "P2PP: component loaded (watching roots: %s)",
+            "P2PP: component loaded (roots: %s, p3_host: %s, auto_print: %s)",
             ", ".join(self._watch_roots),
+            self._p3_host or "not configured",
+            self._auto_print,
         )
 
     # ------------------------------------------------------------------
@@ -133,20 +173,29 @@ class P2PPComponent:
 
         self.logger.info("P2PP: Queuing processing for: %s", filename)
 
-        # Acquire semaphore before spawning to cap concurrency.
         async with self._semaphore:
-            await self._run_subprocess(full_path, output_path)
+            success = await self._run_subprocess(full_path, output_path)
+            if not success:
+                return
+
+            # Upload .mcfx to Palette 3 if host is configured.
+            if self._p3_host:
+                uploaded = await self._upload_to_palette3(output_path)
+                if not uploaded:
+                    # Upload failed — do not attempt to start the print, since
+                    # the Palette 3 won't be ready.
+                    return
+
+            # Optionally start the Klipper print so both devices run in sync.
+            if self._auto_print:
+                await self._start_print(filename)
 
     # ------------------------------------------------------------------
     # P2PP marker detection
     # ------------------------------------------------------------------
 
     def _has_p2pp_marker(self, path: str) -> bool:
-        """Return True if the file contains a P2PP Palette 3 config marker.
-
-        Reads only the tail of the file for efficiency — PrusaSlicer always
-        writes its configuration block at the very end of the exported gcode.
-        """
+        """Return True if the file contains a P2PP Palette 3 config marker."""
         try:
             file_size = os.path.getsize(path)
             with open(path, encoding="utf-8", errors="replace") as fh:
@@ -161,8 +210,11 @@ class P2PPComponent:
     # Subprocess execution
     # ------------------------------------------------------------------
 
-    async def _run_subprocess(self, input_path: str, output_path: str) -> None:
-        """Spawn p2pp_headless.py and stream its output to the Moonraker log."""
+    async def _run_subprocess(self, input_path: str, output_path: str) -> bool:
+        """Spawn p2pp_headless.py and stream its output to the Moonraker log.
+
+        Returns True on success (exit codes 0 or 2), False on failure.
+        """
         self.logger.info(
             "P2PP: Processing %s -> %s",
             os.path.basename(input_path),
@@ -184,7 +236,7 @@ class P2PPComponent:
                 os.path.basename(input_path),
                 exc,
             )
-            return
+            return False
 
         # Forward subprocess output to Moonraker's log.
         for line in stdout_bytes.decode(errors="replace").splitlines():
@@ -216,13 +268,100 @@ class P2PPComponent:
                     "P2PP: Completed successfully: %s",
                     os.path.basename(output_path),
                 )
-            # Moonraker's inotify watcher will detect the new .mcfx file
-            # automatically; no explicit notification is needed.
+            return True
         else:
             self.logger.error(
                 "P2PP: Processing FAILED (exit %d) for %s",
                 rc,
                 os.path.basename(input_path),
+            )
+            return False
+
+    # ------------------------------------------------------------------
+    # Palette 3 upload
+    # ------------------------------------------------------------------
+
+    async def _upload_to_palette3(self, mcfx_path: str) -> bool:
+        """Upload the .mcfx file to the Palette 3 via its HTTP API.
+
+        The Palette 3 exposes a simple multipart upload endpoint:
+            POST http://<host>:5000/print-file
+        with a single field named ``printFile``.
+
+        Returns True on success, False on any error.
+        """
+        if _aiohttp is None:
+            self.logger.error(
+                "P2PP: Cannot upload — aiohttp is not installed"
+            )
+            return False
+
+        p3_filename = os.path.basename(mcfx_path)
+        url = "http://{}:5000/print-file".format(self._p3_host)
+        self.logger.info(
+            "P2PP: Uploading %s to Palette 3 at %s", p3_filename, self._p3_host
+        )
+
+        try:
+            timeout = _aiohttp.ClientTimeout(total=self._p3_upload_timeout)
+            async with _aiohttp.ClientSession(timeout=timeout) as session:
+                with open(mcfx_path, "rb") as fh:
+                    form = _aiohttp.FormData()
+                    form.add_field(
+                        "printFile",
+                        fh,
+                        filename=p3_filename,
+                        content_type="application/octet-stream",
+                    )
+                    resp = await session.post(url, data=form)
+
+            if resp.status == 200:
+                self.logger.info(
+                    "P2PP: Upload complete — %s is ready on Palette 3", p3_filename
+                )
+                return True
+            else:
+                self.logger.error(
+                    "P2PP: Upload failed [HTTP %d] for %s", resp.status, p3_filename
+                )
+                return False
+
+        except asyncio.TimeoutError:
+            self.logger.error(
+                "P2PP: Upload timed out after %ds for %s",
+                self._p3_upload_timeout,
+                p3_filename,
+            )
+        except OSError as exc:
+            self.logger.error(
+                "P2PP: Could not read .mcfx for upload (%s): %s", p3_filename, exc
+            )
+        except Exception as exc:
+            self.logger.error(
+                "P2PP: Upload error for %s: %s", p3_filename, exc
+            )
+
+        return False
+
+    # ------------------------------------------------------------------
+    # Auto-print
+    # ------------------------------------------------------------------
+
+    async def _start_print(self, gcode_filename: str) -> None:
+        """Instruct Klipper to start printing gcode_filename.
+
+        Uses Moonraker's klippy_apis component so the call is internal and
+        does not require an extra HTTP round-trip.  The Palette 3 must
+        already have the matching .mcfx loaded (uploaded in the previous
+        step) before calling this, so that both devices start in sync.
+        """
+        try:
+            kapis = self.server.lookup_component("klippy_apis")
+            await kapis.start_print(gcode_filename)
+            self.logger.info("P2PP: Print started: %s", gcode_filename)
+        except Exception as exc:
+            self.logger.error(
+                "P2PP: Failed to start print %s: %s", gcode_filename, exc
             )
 
 

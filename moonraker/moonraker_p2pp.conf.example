@@ -16,9 +16,23 @@
 # Required: absolute path to p2pp_headless.py
 script_path: /home/pi/p2pp/p2pp_headless.py
 
+# Optional: IP or hostname of the Palette 3.
+# When set, the generated .mcfx is automatically uploaded to the Palette 3
+# after processing so it is ready to run in sync with the Klipper print.
+# palette3_host: 192.168.1.100
+
+# Optional: automatically start the Klipper print after the .mcfx has been
+# uploaded to the Palette 3.  Requires palette3_host to be set.
+# Both devices will then start in sync — Klipper drives the motion, the
+# Palette 3 feeds spliced filament triggered by the ping sequences in the gcode.
+# auto_print: false
+
 # Optional: Moonraker file roots to monitor for gcode uploads.
 # Separate multiple roots with commas.  Default: gcodes
 # watch_roots: gcodes
 
 # Optional: maximum number of files processed concurrently.  Default: 2
 # max_concurrent: 2
+
+# Optional: timeout in seconds for the Palette 3 HTTP upload.  Default: 120
+# p3_upload_timeout: 120
