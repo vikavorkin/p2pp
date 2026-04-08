@@ -15,11 +15,23 @@ Exit codes:
 
 Designed to be called as a subprocess by the Moonraker p2pp component,
 but can also be used standalone.
+
+After processing, the script:
+  1. Extracts print.gcode from the generated .mcfx.
+  2. Strips all Tx tool-change commands (T0, T1, …) — in Palette 3 accessory
+     mode the splicer tracks extrusion mechanically and drives splices from
+     palette.json; Tx commands serve no purpose at the printer and would
+     cause errors without matching Klipper macros.
+  3. Writes the cleaned gcode back over the original .gcode input so that
+     Klipper can print it directly without any printer.cfg changes.
+  4. Updates print.gcode inside the .mcfx to match.
 """
 
 import sys
 import os
+import re
 import types
+import zipfile
 
 # Ensure the repo root is on sys.path so bare `import version` works
 # regardless of the working directory.
@@ -112,6 +124,84 @@ v.version = ver.Version
 
 
 # ---------------------------------------------------------------------------
+# Tx strip — remove tool-change commands from processed gcode
+# ---------------------------------------------------------------------------
+
+# Matches bare tool-change lines: T0, T1, T0 ; comment, etc.
+# Does NOT match T-words inside other commands (e.g. M104 T0 stays intact).
+_TOOLCHANGE_LINE_RE = re.compile(r"^\s*T\d+\s*(?:;.*)?\r?$")
+
+
+def _strip_toolchange_lines(gcode_text):
+    """Return gcode_text with all standalone Tx lines removed."""
+    return "\n".join(
+        line
+        for line in gcode_text.splitlines()
+        if not _TOOLCHANGE_LINE_RE.match(line)
+    ) + "\n"
+
+
+def _repack_mcfx_and_write_gcode(mcfx_path, gcode_out_path):
+    """Extract print.gcode from the .mcfx, strip Tx lines, then:
+      - overwrite gcode_out_path with the cleaned gcode (for Klipper)
+      - rewrite the .mcfx with the cleaned print.gcode (for consistency)
+
+    Returns True on success, False if the .mcfx cannot be read/written.
+    """
+    # --- read existing mcfx ---
+    try:
+        with zipfile.ZipFile(mcfx_path, "r") as zin:
+            names = zin.namelist()
+            contents = {name: zin.read(name) for name in names}
+    except (zipfile.BadZipFile, OSError) as exc:
+        print("[P2PP WARN] Could not open {}: {}".format(mcfx_path, exc), flush=True)
+        return False
+
+    if "print.gcode" not in contents:
+        print("[P2PP WARN] print.gcode not found inside {}".format(mcfx_path), flush=True)
+        return False
+
+    # --- strip Tx lines ---
+    raw_gcode = contents["print.gcode"].decode("utf-8", errors="replace")
+    cleaned_gcode = _strip_toolchange_lines(raw_gcode)
+    contents["print.gcode"] = cleaned_gcode.encode("utf-8")
+
+    # --- write cleaned gcode for Klipper ---
+    try:
+        with open(gcode_out_path, "w", encoding="utf-8") as fh:
+            fh.write(cleaned_gcode)
+        print(
+            "[P2PP] Cleaned gcode (Tx stripped) written to {}".format(
+                os.path.basename(gcode_out_path)
+            ),
+            flush=True,
+        )
+    except OSError as exc:
+        print(
+            "[P2PP WARN] Could not write cleaned gcode to {}: {}".format(
+                gcode_out_path, exc
+            ),
+            flush=True,
+        )
+        return False
+
+    # --- rewrite .mcfx with the cleaned print.gcode ---
+    try:
+        with zipfile.ZipFile(mcfx_path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for name, data in contents.items():
+                zout.writestr(name, data)
+    except OSError as exc:
+        print(
+            "[P2PP WARN] Could not rewrite {}: {}".format(mcfx_path, exc),
+            flush=True,
+        )
+        # gcode_out_path was already written successfully; non-fatal
+        return True
+
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -135,6 +225,12 @@ def main():
     except Exception as e:
         _logexception(e)
         sys.exit(1)
+
+    # Strip Tx commands from the processed gcode.  The cleaned gcode replaces
+    # the original .gcode so Klipper can print it without T-macro definitions,
+    # and the .mcfx is updated to keep print.gcode consistent.
+    if output_file and output_file.endswith(".mcfx") and os.path.isfile(output_file):
+        _repack_mcfx_and_write_gcode(output_file, input_file)
 
     sys.exit(2 if v.process_warnings else 0)
 
