@@ -1,0 +1,38 @@
+# moonraker_p2pp.conf.example
+#
+# Add this [p2pp] section to your moonraker.conf (or include it from there).
+# Moonraker must be able to find p2pp_component.py — either copy/symlink it
+# into ~/moonraker/moonraker/components/p2pp.py, or configure a custom
+# component path in moonraker.conf via the [server] section:
+#
+#   [server]
+#   ...
+#   # (Moonraker 0.8+) path to a directory with extra components
+#   # components_path: /home/pi/p2pp/moonraker
+#
+# Then add the section below.
+
+[p2pp]
+# Required: absolute path to p2pp_headless.py
+script_path: /home/pi/p2pp/p2pp_headless.py
+
+# Optional: IP or hostname of the Palette 3.
+# When set, the generated .mcfx is automatically uploaded to the Palette 3
+# after processing so it is ready to run in sync with the Klipper print.
+# palette3_host: 192.168.1.100
+
+# Optional: automatically start the Klipper print after the .mcfx has been
+# uploaded to the Palette 3.  Requires palette3_host to be set.
+# Both devices will then start in sync — Klipper drives the motion, the
+# Palette 3 feeds spliced filament triggered by the ping sequences in the gcode.
+# auto_print: false
+
+# Optional: Moonraker file roots to monitor for gcode uploads.
+# Separate multiple roots with commas.  Default: gcodes
+# watch_roots: gcodes
+
+# Optional: maximum number of files processed concurrently.  Default: 2
+# max_concurrent: 2
+
+# Optional: timeout in seconds for the Palette 3 HTTP upload.  Default: 120
+# p3_upload_timeout: 120

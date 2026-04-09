@@ -1,2 +1,5 @@
 .idea/
 /tmpfile
+__pycache__/
+*.pyc
+*.pyo
