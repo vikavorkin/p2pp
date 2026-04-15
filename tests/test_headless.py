@@ -86,6 +86,25 @@ class TestOctoprintCmdRegex:
 
 
 # ---------------------------------------------------------------------------
+# _O40_CMD_RE
+# ---------------------------------------------------------------------------
+
+
+class TestO40CmdRegex:
+    def test_matches_o40(self):
+        assert h._O40_CMD_RE.match("O40 L350.00 mm")
+
+    def test_matches_o40_with_leading_whitespace(self):
+        assert h._O40_CMD_RE.match("  O40 L350.00 mm")
+
+    def test_does_not_match_o31(self):
+        assert not h._O40_CMD_RE.match("O31 L350.00 mm")
+
+    def test_does_not_match_o41(self):
+        assert not h._O40_CMD_RE.match("O41 L350.00 mm")
+
+
+# ---------------------------------------------------------------------------
 # _strip_toolchange_lines()
 # ---------------------------------------------------------------------------
 
@@ -107,6 +126,28 @@ class TestStripToolchangeLines:
         assert "O40" not in result
         assert "G1 X10" in result
         assert "G1 X20" in result
+
+    def test_preserve_o40_keeps_o40_lines(self):
+        """With preserve_o40=True, O40 lines must survive stripping."""
+        gcode = "G1 X10\nO31 L350.00 mm\nG1 X20\nO40 L400.00 mm\n"
+        result = h._strip_toolchange_lines(gcode, preserve_o40=True)
+        assert "O31" not in result, "O31 must still be stripped"
+        assert "O40 L400.00 mm" in result, "O40 must be preserved"
+        assert "G1 X10" in result
+        assert "G1 X20" in result
+
+    def test_preserve_o40_still_strips_tx(self):
+        """Tx lines must still be removed even when preserve_o40 is True."""
+        gcode = "T0\nO40 L150.00 mm\nG1 X10\n"
+        result = h._strip_toolchange_lines(gcode, preserve_o40=True)
+        assert "T0" not in result
+        assert "O40 L150.00 mm" in result
+
+    def test_preserve_o40_false_strips_o40(self):
+        """Default behaviour (preserve_o40=False) must strip O40."""
+        gcode = "G1 X10\nO40 L400.00 mm\n"
+        result = h._strip_toolchange_lines(gcode, preserve_o40=False)
+        assert "O40" not in result
 
     def test_preserves_m104_t0(self):
         """Temperature commands with T-parameter must survive stripping."""
