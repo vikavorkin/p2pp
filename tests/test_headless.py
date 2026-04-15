@@ -86,22 +86,22 @@ class TestOctoprintCmdRegex:
 
 
 # ---------------------------------------------------------------------------
-# _O40_CMD_RE
+# _O31_CMD_RE
 # ---------------------------------------------------------------------------
 
 
-class TestO40CmdRegex:
-    def test_matches_o40(self):
-        assert h._O40_CMD_RE.match("O40 L350.00 mm")
+class TestO31CmdRegex:
+    def test_matches_o31(self):
+        assert h._O31_CMD_RE.match("O31 L350.00 mm")
 
-    def test_matches_o40_with_leading_whitespace(self):
-        assert h._O40_CMD_RE.match("  O40 L350.00 mm")
+    def test_matches_o31_with_leading_whitespace(self):
+        assert h._O31_CMD_RE.match("  O31 L350.00 mm")
 
-    def test_does_not_match_o31(self):
-        assert not h._O40_CMD_RE.match("O31 L350.00 mm")
+    def test_does_not_match_o40(self):
+        assert not h._O31_CMD_RE.match("O40 L350.00 mm")
 
-    def test_does_not_match_o41(self):
-        assert not h._O40_CMD_RE.match("O41 L350.00 mm")
+    def test_does_not_match_o30(self):
+        assert not h._O31_CMD_RE.match("O30 L350.00 mm")
 
 
 # ---------------------------------------------------------------------------
@@ -127,27 +127,27 @@ class TestStripToolchangeLines:
         assert "G1 X10" in result
         assert "G1 X20" in result
 
-    def test_preserve_o40_keeps_o40_lines(self):
-        """With preserve_o40=True, O40 lines must survive stripping."""
+    def test_preserve_o31_keeps_o31_lines(self):
+        """With preserve_o31=True, O31 lines must survive stripping."""
         gcode = "G1 X10\nO31 L350.00 mm\nG1 X20\nO40 L400.00 mm\n"
-        result = h._strip_toolchange_lines(gcode, preserve_o40=True)
-        assert "O31" not in result, "O31 must still be stripped"
-        assert "O40 L400.00 mm" in result, "O40 must be preserved"
+        result = h._strip_toolchange_lines(gcode, preserve_o31=True)
+        assert "O31 L350.00 mm" in result, "O31 must be preserved"
+        assert "O40" not in result, "O40 must still be stripped"
         assert "G1 X10" in result
         assert "G1 X20" in result
 
-    def test_preserve_o40_still_strips_tx(self):
-        """Tx lines must still be removed even when preserve_o40 is True."""
-        gcode = "T0\nO40 L150.00 mm\nG1 X10\n"
-        result = h._strip_toolchange_lines(gcode, preserve_o40=True)
+    def test_preserve_o31_still_strips_tx(self):
+        """Tx lines must still be removed even when preserve_o31 is True."""
+        gcode = "T0\nO31 L150.00 mm\nG1 X10\n"
+        result = h._strip_toolchange_lines(gcode, preserve_o31=True)
         assert "T0" not in result
-        assert "O40 L150.00 mm" in result
+        assert "O31 L150.00 mm" in result
 
-    def test_preserve_o40_false_strips_o40(self):
-        """Default behaviour (preserve_o40=False) must strip O40."""
-        gcode = "G1 X10\nO40 L400.00 mm\n"
-        result = h._strip_toolchange_lines(gcode, preserve_o40=False)
-        assert "O40" not in result
+    def test_preserve_o31_false_strips_o31(self):
+        """Default behaviour (preserve_o31=False) must strip O31."""
+        gcode = "G1 X10\nO31 L350.00 mm\n"
+        result = h._strip_toolchange_lines(gcode, preserve_o31=False)
+        assert "O31" not in result
 
     def test_preserves_m104_t0(self):
         """Temperature commands with T-parameter must survive stripping."""

@@ -1,10 +1,13 @@
 """
 klippy/extras/palette3.py — Palette 3 Connected Accessory Mode ping handler
 
-Intercepts O40 L<mm> gcode commands emitted by P2PP in Connected Accessory
-Mode and forwards each ping to the Palette 3 device via MQTT.
+Intercepts O31 L<mm> mm gcode commands emitted by P2PP in Connected Mode
+and forwards each ping to the Palette 3 device via MQTT.
 
-This is the Klipper-native replacement for the OctoPrint P3PING plugin.
+P2PP generates O31 L<mm> mm for Palette 3 Connected Mode (PALETTE3 /
+PALETTE3_PRO keywords).  When Klipper — rather than OctoPrint — is printing
+the gcode, this component replaces the role of OctoPrint's serial forwarding
+and sends each ping directly to the Palette 3 over MQTT.
 
 Palette 3 MQTT API
 ------------------
@@ -16,7 +19,7 @@ Payload format:
     "payload": {"method": "post", "query": {"ping_th": <mm>}}
   }
 
-where ``ping_th`` is the extrusion distance in mm taken from the O40 command,
+where ``ping_th`` is the extrusion distance in mm taken from the O31 command,
 and ``msgID`` is a rolling counter (0–511) used for request/response matching.
 
 printer.cfg example
@@ -29,7 +32,7 @@ printer.cfg example
 
 Gcode commands
 --------------
-  O40 L<mm>           — Connected Accessory Mode ping (injected by P2PP)
+  O31 L<mm>           — Palette 3 ping (injected by P2PP into Connected Mode gcode)
   PALETTE3_CONNECT    — Connect to Palette 3 MQTT broker
   PALETTE3_DISCONNECT — Disconnect from Palette 3 MQTT broker
   PALETTE3_STATUS     — Report current connection state
@@ -75,9 +78,9 @@ class Palette3:
         self._msg_id = 0         # rolling 0-511 counter
 
         self.gcode.register_command(
-            "O40",
-            self._cmd_o40,
-            desc="Palette 3 Connected Accessory Mode ping",
+            "O31",
+            self._cmd_o31,
+            desc="Palette 3 ping (Connected Mode)",
         )
         self.gcode.register_command(
             "PALETTE3_CONNECT",
@@ -202,8 +205,8 @@ class Palette3:
     # Gcode command handlers (run in Klipper's reactor thread)
     # ------------------------------------------------------------------
 
-    def _cmd_o40(self, gcmd):
-        """O40 L<mm> — Palette 3 Connected Accessory Mode ping.
+    def _cmd_o31(self, gcmd):
+        """O31 L<mm> — Palette 3 ping (Connected Mode).
 
         P2PP embeds these commands in the gcode at each ping position.
         The L parameter carries the cumulative extrusion in mm at that point.
@@ -218,7 +221,7 @@ class Palette3:
 
         if not connected or client is None:
             logger.warning(
-                "palette3: O40 ping skipped — not connected to Palette 3 "
+                "palette3: O31 ping skipped — not connected to Palette 3 "
                 "(ping_th=%.2f mm)",
                 ping_mm,
             )

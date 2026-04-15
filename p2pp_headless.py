@@ -141,30 +141,32 @@ _TOOLCHANGE_LINE_RE = re.compile(r"^\s*T\d+\s*(?:;.*)?\r?$")
 # sensing — no stripping needed for those.
 _OCTOPRINT_CMD_RE = re.compile(r"^\s*O\d+\b.*\r?$")
 
-# Matches specifically O40 ping commands (Palette 3 Connected Accessory Mode).
-# In Connected Accessory Mode these must be preserved in the output gcode so
-# that the Klipper palette3.py component can intercept them and forward them
-# to the Palette 3 device via MQTT.
-_O40_CMD_RE = re.compile(r"^\s*O40\b.*\r?$")
+# Matches specifically O31 ping commands (Palette 3 Connected Mode).
+# P2PP emits O31 L<mm> mm for every ping in Connected Mode gcode.  These must
+# be preserved when Klipper is printing the gcode so that the palette3.py
+# component can intercept them and forward each ping to the Palette 3 device
+# via MQTT.
+_O31_CMD_RE = re.compile(r"^\s*O31\b.*\r?$")
 
 
-def _strip_toolchange_lines(gcode_text, preserve_o40=False):
+def _strip_toolchange_lines(gcode_text, preserve_o31=False):
     """Return gcode_text with Tx and OctoPrint O-commands removed.
 
     Args:
-        gcode_text:   Raw gcode string to process.
-        preserve_o40: When True, O40 lines are kept (Connected Accessory Mode —
-                      the Klipper palette3.py component handles them at runtime).
-                      When False (default), O40 is stripped along with all other
-                      O-commands.
+        gcode_text:  Raw gcode string to process.
+        preserve_o31: When True, O31 lines are kept (Connected Mode with
+                      Klipper — the palette3.py component intercepts them at
+                      runtime and forwards each ping to Palette 3 via MQTT).
+                      When False (default), O31 is stripped along with all
+                      other O-commands.
     """
     out = []
     for line in gcode_text.splitlines():
         if _TOOLCHANGE_LINE_RE.match(line):
             continue
         if _OCTOPRINT_CMD_RE.match(line):
-            if preserve_o40 and _O40_CMD_RE.match(line):
-                # Keep O40 for palette3.py to handle at print time.
+            if preserve_o31 and _O31_CMD_RE.match(line):
+                # Keep O31 for palette3.py to handle at print time.
                 pass
             else:
                 continue
@@ -172,7 +174,7 @@ def _strip_toolchange_lines(gcode_text, preserve_o40=False):
     return "\n".join(out) + "\n"
 
 
-def _repack_mcfx_and_write_gcode(mcfx_path, gcode_out_path, preserve_o40=False):
+def _repack_mcfx_and_write_gcode(mcfx_path, gcode_out_path, preserve_o31=False):
     """Extract print.gcode from the .mcfx, strip Tx lines, then:
       - overwrite gcode_out_path with the cleaned gcode (for Klipper)
       - rewrite the .mcfx with the cleaned print.gcode (for consistency)
@@ -192,9 +194,9 @@ def _repack_mcfx_and_write_gcode(mcfx_path, gcode_out_path, preserve_o40=False):
         print("[P2PP WARN] print.gcode not found inside {}".format(mcfx_path), flush=True)
         return False
 
-    # --- strip Tx lines (and O-commands, unless preserve_o40 is set) ---
+    # --- strip Tx lines (and O-commands, unless preserve_o31 is set) ---
     raw_gcode = contents["print.gcode"].decode("utf-8", errors="replace")
-    cleaned_gcode = _strip_toolchange_lines(raw_gcode, preserve_o40=preserve_o40)
+    cleaned_gcode = _strip_toolchange_lines(raw_gcode, preserve_o31=preserve_o31)
     contents["print.gcode"] = cleaned_gcode.encode("utf-8")
 
     # --- write cleaned gcode for Klipper ---
@@ -256,9 +258,9 @@ def main():
         action="store_true",
         default=False,
         help=(
-            "Preserve O40 ping commands in the cleaned gcode. "
-            "Use this when running in Connected Accessory Mode: "
-            "the Klipper palette3.py component intercepts O40 at print time "
+            "Preserve O31 ping commands in the cleaned gcode. "
+            "Use this when Klipper is printing Connected Mode gcode: "
+            "the palette3.py component intercepts O31 at print time "
             "and forwards each ping to the Palette 3 device via MQTT."
         ),
     )
@@ -266,7 +268,7 @@ def main():
 
     input_file  = args.input
     output_file = args.output
-    preserve_o40 = args.connected_accessory
+    preserve_o31 = args.connected_accessory
 
     if not os.path.isfile(input_file):
         print("[P2PP ERROR] Input file not found: {}".format(input_file), file=sys.stderr)
@@ -283,7 +285,7 @@ def main():
     # without T-macro definitions, and the .mcfx is updated to keep
     # print.gcode consistent.
     if output_file and output_file.endswith(".mcfx") and os.path.isfile(output_file):
-        _repack_mcfx_and_write_gcode(output_file, input_file, preserve_o40=preserve_o40)
+        _repack_mcfx_and_write_gcode(output_file, input_file, preserve_o31=preserve_o31)
 
     sys.exit(2 if v.process_warnings else 0)
 

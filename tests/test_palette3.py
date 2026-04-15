@@ -120,10 +120,10 @@ def _make_palette3(opts=None):
 # ---------------------------------------------------------------------------
 
 class TestPalette3Init:
-    def test_registers_o40_command(self):
+    def test_registers_o31_command(self):
         p3 = _make_palette3()
         gcode = p3.gcode
-        assert "O40" in gcode.commands
+        assert "O31" in gcode.commands
 
     def test_registers_palette3_connect(self):
         p3 = _make_palette3()
@@ -147,44 +147,44 @@ class TestPalette3Init:
 
 
 # ---------------------------------------------------------------------------
-# Tests: O40 command — MQTT payload format
+# Tests: O31 command — MQTT payload format
 # ---------------------------------------------------------------------------
 
-class TestO40Payload:
-    """Verify the JSON payload published to Palette 3 for each O40 ping."""
+class TestO31Payload:
+    """Verify the JSON payload published to Palette 3 for each O31 ping."""
 
-    def _run_o40(self, p3, ping_mm):
-        """Force-connect the component and fire one O40 command."""
+    def _run_o31(self, p3, ping_mm):
+        """Force-connect the component and fire one O31 command."""
         fake_client = MagicMock()
         with p3._lock:
             p3._client = fake_client
             p3._connected = True
         gcmd = _FakeGcmd({"L": ping_mm})
-        p3._cmd_o40(gcmd)
+        p3._cmd_o31(gcmd)
         return fake_client
 
     def test_publishes_to_correct_topic(self):
         p3 = _make_palette3()
-        client = self._run_o40(p3, 374.92)
+        client = self._run_o31(p3, 374.92)
         topic = client.publish.call_args[0][0]
         assert topic == "palette/request/print/ping-signature"
 
     def test_payload_contains_ping_th(self):
         p3 = _make_palette3()
-        client = self._run_o40(p3, 374.92)
+        client = self._run_o31(p3, 374.92)
         raw = client.publish.call_args[0][1]
         payload = json.loads(raw)
         assert payload["payload"]["query"]["ping_th"] == 374.92
 
     def test_payload_header_origin_id(self):
         p3 = _make_palette3({"origin_id": "simcoe"})
-        client = self._run_o40(p3, 100.0)
+        client = self._run_o31(p3, 100.0)
         payload = json.loads(client.publish.call_args[0][1])
         assert payload["header"]["originID"] == "simcoe"
 
     def test_payload_header_msg_id_type_and_range(self):
         p3 = _make_palette3()
-        client = self._run_o40(p3, 100.0)
+        client = self._run_o31(p3, 100.0)
         payload = json.loads(client.publish.call_args[0][1])
         msg_id = payload["header"]["msgID"]
         assert isinstance(msg_id, int)
@@ -192,7 +192,7 @@ class TestO40Payload:
 
     def test_payload_method_is_post(self):
         p3 = _make_palette3()
-        client = self._run_o40(p3, 100.0)
+        client = self._run_o31(p3, 100.0)
         payload = json.loads(client.publish.call_args[0][1])
         assert payload["payload"]["method"] == "post"
 
@@ -205,7 +205,7 @@ class TestO40Payload:
 
         msg_ids = []
         for mm in [100.0, 200.0, 300.0]:
-            p3._cmd_o40(_FakeGcmd({"L": mm}))
+            p3._cmd_o31(_FakeGcmd({"L": mm}))
             raw = fake_client.publish.call_args[0][1]
             msg_ids.append(json.loads(raw)["header"]["msgID"])
 
@@ -219,21 +219,21 @@ class TestO40Payload:
             p3._connected = True
             p3._msg_id = 511
 
-        p3._cmd_o40(_FakeGcmd({"L": 100.0}))
+        p3._cmd_o31(_FakeGcmd({"L": 100.0}))
         raw = fake_client.publish.call_args[0][1]
         assert json.loads(raw)["header"]["msgID"] == 0
 
 
 # ---------------------------------------------------------------------------
-# Tests: O40 when not connected
+# Tests: O31 when not connected
 # ---------------------------------------------------------------------------
 
-class TestO40WhenDisconnected:
+class TestO31WhenDisconnected:
     def test_no_publish_when_client_is_none(self):
         p3 = _make_palette3()
         # _client and _connected remain at defaults (None / False)
         gcmd = _FakeGcmd({"L": 150.0})
-        p3._cmd_o40(gcmd)
+        p3._cmd_o31(gcmd)
         # If we get here without AttributeError, the guard worked correctly.
 
     def test_no_publish_when_client_exists_but_not_connected(self):
@@ -242,7 +242,7 @@ class TestO40WhenDisconnected:
         with p3._lock:
             p3._client = fake_client
             p3._connected = False
-        p3._cmd_o40(_FakeGcmd({"L": 150.0}))
+        p3._cmd_o31(_FakeGcmd({"L": 150.0}))
         fake_client.publish.assert_not_called()
 
 
@@ -456,8 +456,8 @@ class TestDoConnect:
 # ---------------------------------------------------------------------------
 
 class TestThreadSafety:
-    def test_concurrent_o40_calls_produce_unique_msg_ids(self):
-        """Fire 100 O40 pings from multiple threads; all msgIDs must be unique."""
+    def test_concurrent_o31_calls_produce_unique_msg_ids(self):
+        """Fire 100 O31 pings from multiple threads; all msgIDs must be unique."""
         p3 = _make_palette3()
         fake_client = MagicMock()
         with p3._lock:
@@ -470,7 +470,7 @@ class TestThreadSafety:
         def fire_pings(n):
             for mm in range(n):
                 gcmd = _FakeGcmd({"L": float(mm)})
-                p3._cmd_o40(gcmd)
+                p3._cmd_o31(gcmd)
                 raw = fake_client.publish.call_args[0][1]
                 mid = json.loads(raw)["header"]["msgID"]
                 with lock:

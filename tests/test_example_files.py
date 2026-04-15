@@ -382,12 +382,14 @@ class TestMcfxGcode:
             f"expected many G1 lines after stripping, found {len(g1_lines)}"
         )
 
-    def test_preserve_o40_flag_does_not_affect_o31(self, mcfx_gcode):
-        """--connected-accessory only preserves O40; O31 must still be stripped."""
-        cleaned = h._strip_toolchange_lines(mcfx_gcode, preserve_o40=True)
-        assert _O31_RE.search(cleaned) is None, (
-            "O31 commands must be stripped even with preserve_o40=True"
+    def test_preserve_o31_keeps_o31_in_mcfx_gcode(self, mcfx_gcode):
+        """--connected-accessory preserves O31 so palette3.py can intercept them."""
+        cleaned = h._strip_toolchange_lines(mcfx_gcode, preserve_o31=True)
+        assert _O31_RE.search(cleaned) is not None, (
+            "O31 commands must be preserved with preserve_o31=True"
         )
+        # All 10 O31 commands must survive
+        assert len(_O31_RE.findall(cleaned)) == 10
 
 
 # ===========================================================================
